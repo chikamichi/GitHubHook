@@ -8,6 +8,8 @@ error_reporting(0);
  * @copyright Copyright (C) 2012 Chin Lee
  * @license http://www.opensource.org/licenses/mit-license.php The MIT License
  * @version 1.0
+ *
+ * Edited by Jean-Denis Vauguet <jd@vauguet.fr>
  */
 
 class GitHubHook
@@ -48,9 +50,9 @@ class GitHubHook
   function __construct() {
     /* Support for EC2 load balancers */
     if (
-        isset($_SERVER['HTTP_X_FORWARDED_FOR']) &&
-        filter_var($_SERVER['HTTP_X_FORWARDED_FOR'], FILTER_VALIDATE_IP)
-      ) {
+      isset($_SERVER['HTTP_X_FORWARDED_FOR']) &&
+      filter_var($_SERVER['HTTP_X_FORWARDED_FOR'], FILTER_VALIDATE_IP)
+    ) {
       $this->_remoteIp = $_SERVER['HTTP_X_FORWARDED_FOR'];
     } else {
       $this->_remoteIp = $_SERVER['REMOTE_ADDR'];
@@ -74,7 +76,7 @@ class GitHubHook
     }
 
     header('HTTP/1.1 404 Not Found');
-    echo '404 Not Found.';
+    echo 'Are you out of your mind?';
     exit;
   }
 
@@ -86,29 +88,29 @@ class GitHubHook
    * @return bool
    */
   private function ip_in_cidrs($ip, $cidrs) {
-	$ipu = explode('.', $ip);
+    $ipu = explode('.', $ip);
 
-	foreach ($ipu as &$v) {
-		$v = str_pad(decbin($v), 8, '0', STR_PAD_LEFT);
-	}
+    foreach ($ipu as &$v) {
+      $v = str_pad(decbin($v), 8, '0', STR_PAD_LEFT);
+    }
 
-	$ipu = join('', $ipu);
-	$result = FALSE;
+    $ipu = join('', $ipu);
+    $result = FALSE;
 
-	foreach ($cidrs as $cidr) {
-		$parts = explode('/', $cidr);
-		$ipc = explode('.', $parts[0]);
+    foreach ($cidrs as $cidr) {
+      $parts = explode('/', $cidr);
+      $ipc = explode('.', $parts[0]);
 
-		foreach ($ipc as &$v) $v = str_pad(decbin($v), 8, '0', STR_PAD_LEFT); {
-			$ipc = substr(join('', $ipc), 0, $parts[1]);
-			$ipux = substr($ipu, 0, $parts[1]);
-			$result = ($ipc === $ipux);
-		}
+      foreach ($ipc as &$v) $v = str_pad(decbin($v), 8, '0', STR_PAD_LEFT); {
+        $ipc = substr(join('', $ipc), 0, $parts[1]);
+        $ipux = substr($ipu, 0, $parts[1]);
+        $result = ($ipc === $ipux);
+      }
 
-		if ($result) break;
-	}
+      if ($result) break;
+    }
 
-	return $result;
+    return $result;
   }
 
   /**
@@ -117,6 +119,23 @@ class GitHubHook
    */
   public function enableDebug() {
     $this->_debug = TRUE;
+  }
+
+  /**
+   * Set storage path.
+   * @since 1.1
+   */
+  public function setStorage($path = '/var/www/git') {
+    $this->_storage = $path;
+  }
+
+  /**
+   * Set GitHub information.
+   * @since 1.1
+   */
+  public function setGitHubInfo($repos = null, $token = '') {
+    $this->_repos = $repos;
+    $this->_token = $token;
   }
 
   /**
@@ -141,10 +160,10 @@ class GitHubHook
    * @param string $message Message to log.
    * @since 1.0
    */
-  public function error($code,$message) {
+  public function error($message) {
     if ($this->_debug) {
-      trigger_error($message,E_USER_ERROR);
-     }
+      trigger_error($message, E_USER_ERROR);
+    }
   }
 
   /**
@@ -154,8 +173,8 @@ class GitHubHook
    */
   public function log($message) {
     if ($this->_debug) {
-       error_log($message);
-     }
+      error_log($message);
+    }
   }
 
   /**
@@ -163,24 +182,35 @@ class GitHubHook
    * @since 1.0
    */
   public function deploy() {
-	// Check the remote is a whitelisted GitHub public ip.
+    // Check the remote is a whitelisted GitHub public ip.
     if ($this->ip_in_cidrs($this->_remoteIp, $this->_github_public_cidrs)) {
       foreach ($this->_branches as $branch) {
         if ($this->_payload->ref == 'refs/heads/' . $branch['name']) {
           $this->log('Deploying to ' . $branch['title'] . ' server');
-	  $output=array(); 
-	  $exit=0;
-	  $cmd='git --git-dir='. escapeshellarg($branch['path'] . '/.git') .' --work-tree='. escapeshellarg($branch['path']) .' pull origin '. escapeshellarg($branch['name']);
-          exec($cmd,$output,$exit);
-	  $msg="\t" . join(PHP_EOL . "\t", $output);
-	  if (0!=$exit)
-	    $this->error("error($exit): " . $branch['path'] . '$ ' . $cmd . PHP_EOL . $msg);
-	  else
-	    $this->log(msg); 
+
+          $output = array();
+          $exit = 0;
+          $msg = '';
+
+          // TODO: do git fetch once, before iterating on branches
+          $cmds = array();
+          $cmds[] = "git --git-dir={$this->_storage}/.git --work-tree={$this->_storage} pull https://{$this->_token}:x-oauth-basic@github.com/{$this->_repos}.git";
+          $cmds[] = "rm -rf {$branch['path']}";
+          $cmds[] = "cp -R {$this->_storage}/wp-theme {$branch['path']}";
+
+          foreach ($cmds as $cmd) {
+            exec($cmd, $output, $exit);
+            $msg="\t" . join(PHP_EOL . "\t", $output);
+
+            if (0!=$exit)
+              $this->error("error($exit): {$branch['name']} >>> $cmd" . PHP_EOL . $msg);
+            else
+              $this->log($msg);
+          }
         }
       }
     } else {
-	  // IP of remote is invalid.
+      // IP of remote is invalid.
       $this->_notFound('IP address not recognized: ' . $this->_remoteIp);
     }
   }
